@@ -1,0 +1,201 @@
+pipeline {
+    agent any
+
+    environment {
+        // GitLab configuration
+        GITLAB_URL = 'https://gitlab.ko2.it/Tarallo/my-first-CI-CD.git'
+        GITLAB_TOKEN = credentials('jenkins-token')
+
+        // Nexus configuration
+        NEXUS_URL = 'http://host.docker.internal:8081/repository/app-flask'
+
+        // Version timestamp
+        BUILD_TIMESTAMP = sh(script: "date '+%Y%m%d%H%M%S'", returnStdout: true).trim()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Checking out code from GitLab repository"
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "*/main"]],
+                    userRemoteConfigs: [[url: "${GITLAB_URL}", credentialsId: 'jenkins-token']]
+                ])
+            }
+        }
+
+        stage('Setup Python Environment') {
+            steps {
+                echo "Creating Python virtual environment..."
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                '''
+            }
+        }
+
+        stage('Code Quality - Ruff Check') {
+            steps {
+                echo "Running Ruff code quality checks..."
+                sh '''
+                    . venv/bin/activate
+                    pip install ruff
+                    
+                    # Crea file di configurazione per escludere il venv
+                    cat > pyproject.toml << 'EOF'
+[tool.ruff]
+exclude = ["venv", "build", "dist", ".git", "__pycache__"]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "B", "S", "C4"]
+ignore = ["S101", "S311", "B008"]
+EOF
+                    
+                    # Esegui ruff check solo sui file Python del progetto
+                    ruff check *.py --config=pyproject.toml
+                '''
+            }
+        }
+
+        stage('Security Analysis - Bandit') {
+            steps {
+                echo "Running Bandit security analysis..."
+                sh '''
+                    . venv/bin/activate
+                    pip install bandit
+                    
+                    # Crea file di configurazione bandit per escludere false positive
+                    cat > .bandit << 'EOF'
+[bandit]
+exclude_dirs = ['venv', 'build', 'dist', '.git']
+skips = ['B101', 'B601']
+
+[bandit.formatters]
+txt = {show_source_code : False}
+EOF
+                    
+                    # Esegui bandit solo sui file Python del progetto
+                    bandit -r . -f json -o bandit-report.json -x 'venv/*,build/*,dist/*' || true
+                    
+                    # Verifica solo i problemi nel nostro codice
+                    python3 - << 'EOF'
+import json, sys, os
+try:
+    with open("bandit-report.json") as f:
+        report = json.load(f)
+    
+    # Filtra solo i risultati nei nostri file (non in venv o dipendenze)
+    our_files = []
+    for result in report.get("results", []):
+        filename = result.get("filename", "")
+        if not any(exclude in filename for exclude in ['venv/', 'build/', 'dist/', 'site-packages/']):
+            if result.get("issue_severity") in ["MEDIUM", "HIGH"]:
+                our_files.append(result)
+    
+    if our_files:
+        print("Medium/High severity issues found in project files:")
+        for issue in our_files:
+            print(f"- File: {issue.get('filename')}")
+            print(f"  Issue: {issue.get('issue_text')}")
+            print(f"  Severity: {issue.get('issue_severity')}")
+            print(f"  Line: {issue.get('line_number')}")
+            print()
+        sys.exit(1)
+    else:
+        print("No medium/high security issues found in project files")
+        
+except FileNotFoundError:
+    print("Bandit report not found")
+except Exception as e:
+    print(f"Error processing bandit report: {e}")
+EOF
+                '''
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                echo "Installing dependencies for Flask application..."
+                sh '''
+                    . venv/bin/activate
+                    pip install -r requirements.txt
+                    pip install pyinstaller
+                    
+                    # Assicurati che version.info esista
+                    if [ ! -f version.info ]; then
+                        echo "dev" > version.info
+                    fi
+                    
+                    # Build dell'eseguibile
+                    pyinstaller --onefile --name app-flask --add-data "version.info:." app.py
+                    ls -la dist/
+                '''
+            }
+        }
+
+        stage('Upload to Nexus') {
+            steps {
+                echo "Uploading artifacts to Nexus..."
+                withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        # Upload con nome latest
+                        curl -v -u \$NEXUS_USER:\$NEXUS_PASS --upload-file dist/app-flask \
+                            ${NEXUS_URL}/app-flask-latest
+                        
+                        # Upload con timestamp
+                        curl -v -u \$NEXUS_USER:\$NEXUS_PASS --upload-file dist/app-flask \
+                            ${NEXUS_URL}/app-flask-${BUILD_TIMESTAMP}
+                    """
+                }
+                echo "Artifacts uploaded successfully:"
+                echo "- app-flask-latest"
+                echo "- app-flask-${BUILD_TIMESTAMP}"
+            }
+        }
+
+        stage('Update Version and Tag') {
+            steps {
+                echo "Updating version.info and creating Git tag..."
+                withCredentials([usernamePassword(credentialsId: 'jenkins-token', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    sh """
+                        # Scrivi la nuova versione
+                        echo "${BUILD_TIMESTAMP}" > version.info
+                        
+                        # Configura git
+                        git config user.name "Jenkins CI"
+                        git config user.email "jenkins@cicd.local"
+                        
+                        # Add e commit
+                        git add version.info
+                        git commit -m "Update version to ${BUILD_TIMESTAMP} [skip ci]" || echo "No changes to commit"
+                        
+                        # Push con autenticazione
+                        git push https://\$GIT_USER:\$GIT_PASS@gitlab.ko2.it/Tarallo/my-first-CI-CD.git HEAD:main || echo "Push failed, continuing..."
+                        
+                        # Crea e push del tag
+                        git tag ${BUILD_TIMESTAMP} || echo "Tag already exists"
+                        git push https://\$GIT_USER:\$GIT_PASS@gitlab.ko2.it/Tarallo/my-first-CI-CD.git ${BUILD_TIMESTAMP} || echo "Tag push failed, continuing..."
+                    """
+                }
+                echo "Version updated to: ${BUILD_TIMESTAMP}"
+                echo "Git tag created: ${BUILD_TIMESTAMP}"
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline completed successfully! Application version: ${BUILD_TIMESTAMP}"
+        }
+        failure {
+            echo "Pipeline failed!"
+        }
+        always {
+            // Pulizia del workspace
+            sh 'rm -rf venv bandit-report.json pyproject.toml .bandit || true'
+        }
+    }
+}

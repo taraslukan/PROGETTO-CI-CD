@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  jenkins:
+    build: ./jenkins
+    container_name: jenkins
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    networks:
+      - cicd-net
+ 
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    hostname: gitlab.local
+    ports:
+      - "80:80"
+      - "443:443"
+      - "22:22"
+    environment:
+      GITLAB_ROOT_PASSWORD: "!123abc!"
+      GITLAB_ROOT_EMAIL: "ko2@example.it"
+      GITLAB_URL: "http://localhost"
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    networks:
+      - cicd-net
+ 
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: nexus
+    ports:
+      - "8081:8081"
+    volumes:
+      - nexus-data:/nexus-data
+    networks:
+      - cicd-net
+ 
+volumes:
+  jenkins_home:
+  gitlab_config:
+  gitlab_logs:
+  gitlab_data:
+  nexus-data:
+ 
+networks:
+  cicd-net:
+    driver: bridge
+

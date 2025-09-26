@@ -1,0 +1,74 @@
+# Flask App v2 - Configuration Values
+replicaCount: 1
+
+# Application configuration
+app:
+  version: "latest"  # Può essere "latest" o timestamp specifico (es. "20250912123456")
+  agentName: "K8sAgent"  # Nome dell'agente per il messaggio
+
+# Base image configuration (NON l'eseguibile da Nexus)
+image:
+  repository: python
+  tag: "3.11"
+  pullPolicy: IfNotPresent
+
+# Nexus configuration per download dell'eseguibile
+nexus:
+  url: "http://host.docker.internal:8081/repository/app-flask"
+  # L'artifact sarà: app-flask-{version} dove version può essere "latest" o timestamp
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 5000
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: flask-app.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Health checks configuration
+probes:
+  liveness:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 60
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Resources configuration
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Autoscaling configuration (opzionale)
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# Node assignment
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Additional environment variables (opzionale)
+extraEnvVars: []

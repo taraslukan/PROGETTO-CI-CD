@@ -1,0 +1,97 @@
+[build-system]ignore = ["S104"]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flask-app-cicd"
+version = "2.0.0"
+description = "Flask app with CI/CD pipeline, rate limiting and versioning"
+authors = [{name = "Taras", email = "taras@example.com"}]
+requires-python = ">=3.11"
+dependencies = [
+    "Flask>=2.3.0",
+    "Flask-Limiter>=3.5.0",
+    "redis>=5.0.0"
+]
+
+[tool.ruff]
+# Directory da escludere
+ignore = ["S104"]
+exclude = [
+    "venv",
+    "build", 
+    "dist",
+    ".git",
+    "__pycache__",
+    "*.egg-info",
+    ".pytest_cache",
+    ".mypy_cache"
+]
+
+# Lunghezza massima delle righe
+line-length = 88
+
+# Versione Python target
+target-version = "py311"
+
+# File da includere nella scansione
+include = ["*.py"]
+
+[tool.ruff.lint]
+# Regole da selezionare (meno aggressive per evitare troppi warning)
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings  
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "B",   # flake8-bugbear
+    "S",   # bandit (security)
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "PIE", # flake8-pie
+    "T20", # flake8-print
+]
+
+# Regole da ignorare (comuni per applicazioni Flask)
+ignore = [
+    "S101",  # Use of assert detected - OK nei test
+    "S311",  # Standard pseudo-random generators are not suitable for cryptographic purposes
+    "B008",  # Do not perform function calls in argument defaults
+    "E501",  # Line too long (gestito da formatter)
+    "T201",  # print statements (OK per logging semplice)
+    "S104",  # Possible binding to all interfaces - OK per sviluppo
+]
+
+# Permetti fixes automatici per questi errori
+fixable = ["I", "F401", "UP", "C4"]
+
+# Non fixare automaticamente questi
+unfixable = ["B", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignora alcune regole nei file di test
+"test_*.py" = ["S101", "S311", "B011"]
+"*_test.py" = ["S101", "S311", "B011"]
+
+# Ignora binding warnings nell'app principale
+"app.py" = ["S104"]
+
+[tool.ruff.lint.isort]
+# Configurazione per ordinamento import
+known-first-party = ["app"]
+force-single-line = false
+split-on-trailing-comma = true
+
+[tool.ruff.lint.mccabe]
+# Complessità massima delle funzioni
+max-complexity = 10
+
+[tool.ruff.lint.pep8-naming]
+# Ignora alcuni naming patterns comuni in Flask
+ignore-names = ["app", "db", "bp"]
+
+[tool.bandit]
+# File di configurazione per bandit (alternativa a .bandit)
+exclude_dirs = ["venv", "build", "dist", ".git", "__pycache__"]
+skips = ["B101", "B601"]

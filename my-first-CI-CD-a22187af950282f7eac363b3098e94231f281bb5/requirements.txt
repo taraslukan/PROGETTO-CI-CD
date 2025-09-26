@@ -1,0 +1,4 @@
+Flask==2.3.3
+Flask-Limiter==3.5.0
+redis==5.0.1
+pyinstaller==6.1.0

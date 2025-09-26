@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "flask-app.fullname" . }}
+  labels:
+    {{- include "flask-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "flask-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "flask-app.selectorLabels" . | nindent 8 }}
+      annotations:
+        app.version: "{{ .Values.app.version }}"
+    spec:
+      containers:
+      - name: flask-app
+        image: "python:3.12-slim"  # immagine base valida
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -e
+          echo "=== Flask App v2 Deployment ==="
+          echo "Target version: {{ .Values.app.version }}"
+          echo "Installing dependencies..."
+          apt-get update > /dev/null 2>&1
+          apt-get install -y curl > /dev/null 2>&1
+
+          echo "Downloading executable from Nexus..."
+          NEXUS_URL="{{ .Values.nexus.url }}"
+          {{ if eq (.Values.app.version | toString) "latest" -}}
+          ARTIFACT_NAME="app-flask-latest"
+          {{ else -}}
+          ARTIFACT_NAME="app-flask-{{ .Values.app.version }}"
+          {{ end -}}
+
+          echo "Attempting to download: ${NEXUS_URL}/${ARTIFACT_NAME}"
+          curl -f -L -o /tmp/app-flask-executable "${NEXUS_URL}/${ARTIFACT_NAME}"
+
+          if [ ! -f /tmp/app-flask-executable ]; then
+            echo "ERROR: Failed to download executable"
+            exit 1
+          fi
+
+          chmod +x /tmp/app-flask-executable
+          echo "{{ .Values.app.version }}" > /tmp/version.info
+
+          echo "Starting Flask application..."
+          cd /tmp
+          exec ./app-flask-executable
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        env:
+        - name: AGENT_NAME
+          value: "{{ .Values.app.agentName | default "K8sAgent" }}"
+        - name: PORT
+          value: "5000"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+          failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+
